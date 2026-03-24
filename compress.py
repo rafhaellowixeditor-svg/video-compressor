@@ -14,11 +14,18 @@ PUBLIC_KEY_B64 = os.getenv("RSA_PUBLIC_KEY")
 INPUT_FILE_ID  = os.getenv("GDRIVE_INPUT_FILE_ID")
 
 def get_public_key():
-    """Decodes Base64 and loads the X.509 Public Key."""
     try:
-        # Fix padding before decoding
-        padded = PUBLIC_KEY_B64 + '=' * (-len(PUBLIC_KEY_B64) % 4)
-        decoded_bytes = base64.b64decode(padded)
+        # Strip any accidental whitespace from the secret
+        clean_b64 = PUBLIC_KEY_B64.strip()
+        # Add padding if missing
+        clean_b64 += '=' * (-len(clean_b64) % 4)
+        decoded_bytes = base64.b64decode(clean_b64)
+        print(f"DEBUG decoded start: {decoded_bytes[:40]}")  # Should show -----BEGIN PUBLIC KEY-----
+        
+        # Sanity check: decoded bytes should start with a PEM header
+        if not decoded_bytes.startswith(b'-----BEGIN'):
+            raise ValueError("Decoded bytes don't look like a PEM key")
+        
         return serialization.load_pem_public_key(decoded_bytes)
     except Exception as e:
         print(f"Key Loading Error: {str(e)}")
