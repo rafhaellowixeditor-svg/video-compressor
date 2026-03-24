@@ -5,50 +5,48 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
-# Get Config from Environment
 CLIENT_ID      = os.getenv("GDRIVE_CLIENT_ID")
 CLIENT_SECRET  = os.getenv("GDRIVE_CLIENT_SECRET")
 REFRESH_TOKEN  = os.getenv("GDRIVE_REFRESH_TOKEN")
 FOLDER_ID      = os.getenv("GDRIVE_FOLDER_ID")
-PUBLIC_KEY_B64 = os.getenv("RSA_PUBLIC_KEY")
+PUBLIC_KEY_RAW = os.getenv("RSA_PUBLIC_KEY")
 INPUT_FILE_ID  = os.getenv("GDRIVE_INPUT_FILE_ID")
 
-def setup_security():
-    if INPUT_FILE_ID:
-        print(f"::add-mask::{INPUT_FILE_ID}")
-
-def get_public_key():
-    """Decodes the Base64 key and loads it correctly."""
-    try:
-        key_data = base64.b64decode(PUBLIC_KEY_B64)
-        return serialization.load_pem_public_key(key_data)
-    except Exception as e:
-        print(f"Error: Could not load RSA Public Key. {e}")
-        sys.exit(1)
+def format_pem_key(raw_key):
+    clean_key = raw_key.replace("-----BEGIN PUBLIC KEY-----", "")
+    clean_key = clean_key.replace("-----END PUBLIC KEY-----", "")
+    clean_key = "".join(clean_key.split())
+    
+    formatted = "-----BEGIN PUBLIC KEY-----\n"
+    for i in range(0, len(clean_key), 64):
+        formatted += clean_key[i:i+64] + "\n"
+    formatted += "-----END PUBLIC KEY-----"
+    return formatted
 
 def encrypt_id(file_id):
-    """Encrypts the Output ID."""
-    public_key = get_public_key()
-    ciphertext = public_key.encrypt(
-        file_id.encode(),
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
+    try:
+        pem_data = format_pem_key(PUBLIC_KEY_RAW)
+        public_key = serialization.load_pem_public_key(pem_data.encode())
+        
+        ciphertext = public_key.encrypt(
+            file_id.encode(),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
         )
-    )
-    return base64.b64encode(ciphertext).decode()
+        return base64.b64encode(ciphertext).decode()
+    except Exception as e:
+        print(f"Encryption Error: {str(e)}")
+        return None
 
 def validate_id(id_string):
-    if not id_string or not re.match(r'^[a-zA-Z0-9\-_]{25,100}$', id_string):
-        return False
-    return True
+    return bool(id_string and re.match(r'^[a-zA-Z0-9\-_]{25,100}$', id_string))
 
 def process():
-    setup_security()
-    
     if not validate_id(INPUT_FILE_ID):
-        print("Error: Invalid Input ID.")
+        print("Error: Invalid Input ID")
         sys.exit(1)
 
     tmp_in, tmp_out = None, None
@@ -58,22 +56,22 @@ def process():
                             client_secret=CLIENT_SECRET, token_uri="https://oauth2.googleapis.com/token")
         service = build('drive', 'v3', credentials=creds)
 
-        file_info = service.files().get(fileId=INPUT_FILE_ID, fields='name').execute()
-
-        tmp_in = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        print("Downloading source...")
         request = service.files().get_media(fileId=INPUT_FILE_ID)
+        tmp_in = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
         with open(tmp_in, "wb") as f:
             downloader = MediaIoBaseDownload(f, request)
             done = False
             while not done:
                 _, done = downloader.next_chunk()
 
+        print("Compressing...")
         tmp_out = tempfile.mktemp(suffix=".mp4")
         subprocess.run(['ffmpeg', '-y', '-i', tmp_in, '-vcodec', 'libx264', '-crf', '28', 
                         '-preset', 'faster', '-movflags', '+faststart', tmp_out], 
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    
+        print("Uploading...")
         meta = {'name': f"output-{INPUT_FILE_ID[:5]}.mp4"}
         if FOLDER_ID: meta['parents'] = [FOLDER_ID]
 
@@ -83,13 +81,17 @@ def process():
 
         service.permissions().create(fileId=uploaded_id, body={'type': 'anyone', 'role': 'reader'}).execute()
 
-        secure_blob = encrypt_id(uploaded_id)
-        print("\n--- SECURE RESULT BEGIN ---")
-        print(secure_blob)
-        print("--- SECURE RESULT END ---")
+        if PUBLIC_KEY_RAW:
+            secure_blob = encrypt_id(uploaded_id)
+            if secure_blob:
+                print("\n--- SECURE RESULT BEGIN ---")
+                print(secure_blob)
+                print("--- SECURE RESULT END ---")
+        else:
+            print(f"DEBUG_UPLOADED_ID: {uploaded_id}")
 
-    except Exception:
-        print("An error occurred during processing.")
+    except Exception as e:
+        print(f"An error occurred.")
         sys.exit(1)
     finally:
         if tmp_in and os.path.exists(tmp_in): os.remove(tmp_in)
