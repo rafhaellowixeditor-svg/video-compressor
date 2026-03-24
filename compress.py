@@ -1,119 +1,90 @@
-import os, sys, subprocess, re, tempfile, base64
+import os, sys, subprocess, re, tempfile, base64, uuid
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-import uuid
 
-# Config from Environment
+# Config
 CLIENT_ID      = os.getenv("GDRIVE_CLIENT_ID")
 CLIENT_SECRET  = os.getenv("GDRIVE_CLIENT_SECRET")
 REFRESH_TOKEN  = os.getenv("GDRIVE_REFRESH_TOKEN")
 FOLDER_ID      = os.getenv("GDRIVE_FOLDER_ID")
-PUBLIC_KEY_RAW = os.getenv("RSA_PUBLIC_KEY")
+PUBLIC_KEY_B64 = os.getenv("RSA_PUBLIC_KEY")
 INPUT_FILE_ID  = os.getenv("GDRIVE_INPUT_FILE_ID")
 
-def format_pem_key(raw_key):
-    """Ensures the PEM key has correct headers and line breaks."""
-    clean = raw_key.replace("-----BEGIN PUBLIC KEY-----", "")
-    clean = clean.replace("-----END PUBLIC KEY-----", "")
-    clean = "".join(clean.split())
-    formatted = "-----BEGIN PUBLIC KEY-----\n"
-    for i in range(0, len(clean), 64):
-        formatted += clean[i:i+64] + "\n"
-    formatted += "-----END PUBLIC KEY-----"
-    return formatted
+def get_public_key():
+    """Decodes Base64 and loads the X.509 Public Key."""
+    try:
+        # 1. Decode the Base64 string from GitHub Secrets
+        decoded_bytes = base64.b64decode(PUBLIC_KEY_B64)
+        
+        # 2. Load the Public Key (supports X.509 / SubjectPublicKeyInfo)
+        return serialization.load_pem_public_key(decoded_bytes)
+    except Exception as e:
+        print(f"Key Loading Error: {str(e)}")
+        return None
 
 def encrypt_id(file_id):
-    """Encrypts the File ID using PKCS1v15 padding for JS compatibility."""
+    """Encrypts using PKCS1v15 padding (Required for JSEncrypt)."""
+    public_key = get_public_key()
+    if not public_key: return None
     try:
-        pem_formatted = format_pem_key(PUBLIC_KEY_RAW)
-        public_key = serialization.load_pem_public_key(pem_formatted.encode())
         ciphertext = public_key.encrypt(
             file_id.encode(),
-            padding.PKCS1v15()
+            padding.PKCS1v15() 
         )
         return base64.b64encode(ciphertext).decode()
     except Exception as e:
         print(f"Encryption Error: {str(e)}")
         return None
 
-def validate_id(id_string):
-    return bool(id_string and re.match(r'^[a-zA-Z0-9\-_]{25,100}$', id_string))
-
 def process():
-    if not validate_id(INPUT_FILE_ID):
-        print("Error: Invalid Input ID")
-        sys.exit(1)
-
-    # Initialize variables to ensure cleanup works even if upload fails
-    tmp_in = None
-    tmp_out = None
-
     try:
-        # 1. Setup Service
+        # --- PREPARATION & AUTH ---
         creds = Credentials(None, refresh_token=REFRESH_TOKEN, client_id=CLIENT_ID, 
                             client_secret=CLIENT_SECRET, token_uri="https://oauth2.googleapis.com/token")
         service = build('drive', 'v3', credentials=creds)
 
-        # 2. Download Source
-        print(f"Downloading source: {INPUT_FILE_ID}")
+        # --- DOWNLOAD ---
+        print(f"Downloading: {INPUT_FILE_ID}")
         request = service.files().get_media(fileId=INPUT_FILE_ID)
-        tmp_in_handler = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-        tmp_in = tmp_in_handler.name
-        
-        downloader = MediaIoBaseDownload(tmp_in_handler, request)
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
-        tmp_in_handler.close()
+        tmp_in = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        with open(tmp_in, "wb") as f:
+            downloader = MediaIoBaseDownload(f, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
 
-        # 3. Compress with FFmpeg
+        # --- COMPRESS ---
         print("Compressing...")
         tmp_out = tempfile.mktemp(suffix=".mp4")
-        # Silence FFmpeg to prevent leaking info in public logs
-        subprocess.run([
-            'ffmpeg', '-y', '-i', tmp_in, 
-            '-vcodec', 'libx264', '-crf', '28', 
-            '-preset', 'faster', '-movflags', '+faststart', 
-            tmp_out
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['ffmpeg', '-y', '-i', tmp_in, '-vcodec', 'libx264', '-crf', '28', 
+                        '-preset', 'faster', '-movflags', '+faststart', tmp_out], 
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # 4. Upload to Drive
-        print("Uploading compressed version...")
-        random_name = f"{uuid.uuid4().hex}.mp4"
-        file_metadata = {'name': random_name}
-        if FOLDER_ID:
-            file_metadata['parents'] = [FOLDER_ID]
-
+        # --- UPLOAD ---
+        print("Uploading...")
+        file_metadata = {'name': f"{uuid.uuid4().hex}.mp4"}
+        if FOLDER_ID: file_metadata['parents'] = [FOLDER_ID]
         media = MediaFileUpload(tmp_out, mimetype='video/mp4', resumable=True)
-        file_obj = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        
-        # SUCCESS! Here is the defined uploaded_id
-        uploaded_id = file_obj.get('id')
-        print(f"RAW_UPLOADED_ID: {uploaded_id}")
+        uploaded_file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        uploaded_id = uploaded_file.get('id')
 
-        # 5. Set Permissions
+        # --- PERMISSIONS ---
         service.permissions().create(fileId=uploaded_id, body={'type': 'anyone', 'role': 'reader'}).execute()
 
-        # 6. Encrypt the Result for Web App
-        if PUBLIC_KEY_RAW:
-            secure_blob = encrypt_id(uploaded_id)
-            if secure_blob:
-                print("\n--- SECURE RESULT BEGIN ---")
-                print(secure_blob)
-                print("--- SECURE RESULT END ---")
-        else:
-            print("Warning: RSA_PUBLIC_KEY not found in environment.")
+        # --- OUTPUT ---
+        print(f"RAW_UPLOADED_ID: {uploaded_id}")
+        secure_blob = encrypt_id(uploaded_id)
+        if secure_blob:
+            print("\n--- SECURE RESULT BEGIN ---")
+            print(secure_blob)
+            print("--- SECURE RESULT END ---")
 
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Process Error: {e}")
         sys.exit(1)
-    finally:
-        # Cleanup temp files
-        if tmp_in and os.path.exists(tmp_in): os.remove(tmp_in)
-        if tmp_out and os.path.exists(tmp_out): os.remove(tmp_out)
 
 if __name__ == "__main__":
     process()
