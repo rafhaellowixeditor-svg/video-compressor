@@ -8,9 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
-        with: { python-version: '3.10' }
+        with: { python-version: '3.13' }
+
+      - name: Mask Input ID
+        run: echo "::add-mask::${{ github.event.client_payload.file_id }}"
 
       - name: Install Dependencies
         run: |
