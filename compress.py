@@ -16,10 +16,9 @@ INPUT_FILE_ID  = os.getenv("GDRIVE_INPUT_FILE_ID")
 def get_public_key():
     """Decodes Base64 and loads the X.509 Public Key."""
     try:
-        # 1. Decode the Base64 string from GitHub Secrets
-        decoded_bytes = base64.b64decode(PUBLIC_KEY_B64)
-        
-        # 2. Load the Public Key (supports X.509 / SubjectPublicKeyInfo)
+        # Fix padding before decoding
+        padded = PUBLIC_KEY_B64 + '=' * (-len(PUBLIC_KEY_B64) % 4)
+        decoded_bytes = base64.b64decode(padded)
         return serialization.load_pem_public_key(decoded_bytes)
     except Exception as e:
         print(f"Key Loading Error: {str(e)}")
