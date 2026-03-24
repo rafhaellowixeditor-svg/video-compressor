@@ -15,18 +15,18 @@ INPUT_FILE_ID  = os.getenv("GDRIVE_INPUT_FILE_ID")
 
 def get_public_key():
     try:
-        # Strip any accidental whitespace from the secret
         clean_b64 = PUBLIC_KEY_B64.strip()
-        # Add padding if missing
         clean_b64 += '=' * (-len(clean_b64) % 4)
-        decoded_bytes = base64.b64decode(clean_b64)
-        print(f"DEBUG decoded start: {decoded_bytes[:40]}")  # Should show -----BEGIN PUBLIC KEY-----
         
-        # Sanity check: decoded bytes should start with a PEM header
-        if not decoded_bytes.startswith(b'-----BEGIN'):
-            raise ValueError("Decoded bytes don't look like a PEM key")
+        # First decode — gets you the intermediate Base64 bytes
+        first_decode = base64.b64decode(clean_b64)
         
-        return serialization.load_pem_public_key(decoded_bytes)
+        # Second decode — gets you the actual PEM text
+        pem_bytes = base64.b64decode(first_decode)
+        
+        print(f"DEBUG pem start: {pem_bytes[:27]}")  # Should show b'-----BEGIN PUBLIC KEY-----'
+        
+        return serialization.load_pem_public_key(pem_bytes)
     except Exception as e:
         print(f"Key Loading Error: {str(e)}")
         return None
