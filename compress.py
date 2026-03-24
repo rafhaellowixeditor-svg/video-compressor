@@ -72,12 +72,15 @@ def process():
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         print("Uploading...")
-        meta = {'name': f"output-{INPUT_FILE_ID[:5]}.mp4"}
+        meta = {'name': 'temp.mp4'}
         if FOLDER_ID: meta['parents'] = [FOLDER_ID]
 
         media = MediaFileUpload(tmp_out, mimetype='video/mp4', resumable=True)
         res = service.files().create(body=meta, media_body=media, fields='id').execute()
         uploaded_id = res.get('id')
+
+        new_name = f"{uploaded_id}.mp4"
+        service.files().update(fileId=uploaded_id, body={'name': new_name}).execute()
 
         service.permissions().create(fileId=uploaded_id, body={'type': 'anyone', 'role': 'reader'}).execute()
 
