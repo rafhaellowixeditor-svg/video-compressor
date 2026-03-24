@@ -15,18 +15,21 @@ INPUT_FILE_ID  = os.getenv("GDRIVE_INPUT_FILE_ID")
 
 def get_public_key():
     try:
-        clean_b64 = PUBLIC_KEY_B64.strip()
-        clean_b64 += '=' * (-len(clean_b64) % 4)
+        pem = os.getenv("RSA_PUBLIC_KEY", "").strip()
         
-        # First decode — gets you the intermediate Base64 bytes
-        first_decode = base64.b64decode(clean_b64)
+        # Re-insert newlines that GitHub Variables stripped
+        pem = pem.replace("-----BEGIN PUBLIC KEY-----", "-----BEGIN PUBLIC KEY-----\n")
+        pem = pem.replace("-----END PUBLIC KEY-----", "\n-----END PUBLIC KEY-----")
         
-        # Second decode — gets you the actual PEM text
-        pem_bytes = base64.b64decode(first_decode)
+        # Split the base64 body into 64-char lines (PEM standard)
+        header = "-----BEGIN PUBLIC KEY-----"
+        footer = "-----END PUBLIC KEY-----"
+        body = pem.replace(header, "").replace(footer, "").strip()
+        body_wrapped = "\n".join(body[i:i+64] for i in range(0, len(body), 64))
+        pem = f"{header}\n{body_wrapped}\n{footer}"
         
-        print(f"DEBUG pem start: {pem_bytes[:27]}")  # Should show b'-----BEGIN PUBLIC KEY-----'
-        
-        return serialization.load_pem_public_key(pem_bytes)
+        print(f"DEBUG key length: {len(pem)}")
+        return serialization.load_pem_public_key(pem.encode())
     except Exception as e:
         print(f"Key Loading Error: {str(e)}")
         return None
