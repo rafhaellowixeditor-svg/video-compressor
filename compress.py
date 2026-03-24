@@ -1,8 +1,4 @@
-import os
-import sys
-import subprocess
-import re
-import tempfile
+import os, sys, subprocess, re, tempfile
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
@@ -13,15 +9,15 @@ CLIENT_SECRET = os.getenv("GDRIVE_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("GDRIVE_REFRESH_TOKEN")
 FOLDER_ID     = os.getenv("GDRIVE_FOLDER_ID")
 
-def validate_file_id(file_id):
-    if not file_id or not re.match(r'^[a-zA-Z0-9\-_]{25,100}$', file_id):
-        sys.exit(1)
+def validate_id(id_string):
+    if not id_string or not re.match(r'^[a-zA-Z0-9\-_]{25,100}$', id_string):
+        return False
+    return True
 
 def slugify(name):
     name_no_ext = os.path.splitext(name)[0]
     slugged = re.sub(r'[^a-zA-Z0-9]', '-', name_no_ext)
-    slugged = re.sub(r'-+', '-', slugged)
-    return slugged.strip('-')
+    return re.sub(r'-+', '-', slugged).strip('-')
 
 def set_github_output(key, value):
     github_output = os.getenv("GITHUB_OUTPUT")
@@ -31,81 +27,57 @@ def set_github_output(key, value):
 
 def process():
     if len(sys.argv) < 2:
-        print("Error: Missing input File ID.")
+        print("Error: Missing File ID")
         sys.exit(1)
 
     FILE_ID = sys.argv[1]
-    validate_file_id(FILE_ID)
-
-    if not all([CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN]):
-        print("Error: Missing required Google Drive credentials in environment.")
+    if not validate_id(FILE_ID):
+        print("Error: Invalid File ID")
         sys.exit(1)
 
     try:
-        creds = Credentials(
-            None,
-            refresh_token=REFRESH_TOKEN,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            token_uri="https://oauth2.googleapis.com/token"
-        )
+        creds = Credentials(None, refresh_token=REFRESH_TOKEN, client_id=CLIENT_ID, 
+                            client_secret=CLIENT_SECRET, token_uri="https://oauth2.googleapis.com/token")
         service = build('drive', 'v3', credentials=creds)
 
         file_info = service.files().get(fileId=FILE_ID, fields='name').execute()
-        slug = slugify(file_info.get('name', 'video'))
-        output_filename = f"compressed-{slug}.mp4"
+        output_filename = f"compressed-{slugify(file_info.get('name', 'video'))}.mp4"
 
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_in:
-            in_path = tmp_in.name
-            request = service.files().get_media(fileId=FILE_ID)
-            downloader = MediaIoBaseDownload(tmp_in, request)
+        tmp_in = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+        request = service.files().get_media(fileId=FILE_ID)
+        with open(tmp_in, "wb") as f:
+            downloader = MediaIoBaseDownload(f, request)
             done = False
             while not done:
-                status, done = downloader.next_chunk()
+                _, done = downloader.next_chunk()
 
-        out_path = tempfile.mktemp(suffix=".mp4")
-        try:
-            subprocess.run([
-                'ffmpeg', '-y', '-i', in_path,
-                '-vcodec', 'libx264', '-crf', '28', '-preset', 'faster',
-                '-movflags', '+faststart', out_path
-            ], check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            print("Error: FFmpeg compression failed.")
-            sys.exit(1)
+        tmp_out = tempfile.mktemp(suffix=".mp4")
+        subprocess.run(['ffmpeg', '-y', '-i', tmp_in, '-vcodec', 'libx264', '-crf', '28', 
+                        '-preset', 'faster', '-movflags', '+faststart', tmp_out], 
+                       check=True, capture_output=True)
 
-        file_metadata = {'name': output_filename}
-        if FOLDER_ID:
-            file_metadata['parents'] = [FOLDER_ID]
+        meta = {'name': output_filename}
+        if FOLDER_ID and validate_id(FOLDER_ID):
+            meta['parents'] = [FOLDER_ID]
 
-        media = MediaFileUpload(out_path, mimetype='video/mp4', resumable=True)
-        upload_req = service.files().create(body=file_metadata, media_body=media, fields='id')
-        
-        response = None
-        while response is None:
-            status, response = upload_req.next_chunk()
+        media = MediaFileUpload(tmp_out, mimetype='video/mp4', resumable=True)
+        res = service.files().create(body=meta, media_body=media, fields='id').execute()
+        uploaded_id = res.get('id')
 
-        uploaded_id = response.get('id')
+        service.permissions().create(fileId=uploaded_id, body={'type': 'anyone', 'role': 'reader'}).execute()
 
-        service.permissions().create(
-            fileId=uploaded_id,
-            body={'type': 'anyone', 'role': 'reader'}
-        ).execute()
-
-        public_url = f"https://drive.google.com/file/d/{uploaded_id}/view"
-        set_github_output("public_url", public_url)
+        set_github_output("public_url", f"https://drive.google.com/file/d/{uploaded_id}/view")
         set_github_output("file_name", output_filename)
+        set_github_output("file_id", uploaded_id)
         
-        print("Process complete. File uploaded successfully.")
+        print(f"Success: {uploaded_id}")
 
-    except HttpError as e:
-        print(f"Google API Error occurred")
-    except Exception:
-        print("An unexpected error occurred. Check script logic.")
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
     finally:
-        for p in [in_path, out_path]:
-            if 'p' in locals() and os.path.exists(p):
-                os.remove(p)
+        for p in [tmp_in, tmp_out]:
+            if os.path.exists(p): os.remove(p)
 
 if __name__ == "__main__":
     process()
