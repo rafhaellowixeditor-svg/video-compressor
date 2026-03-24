@@ -2,32 +2,26 @@ name: Video Compression Worker
 on:
   repository_dispatch:
     types: [start_compress]
-
 jobs:
   compress_job:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with: { python-version: '3.13' }
-
       - name: Mask Input ID
         run: echo "::add-mask::${{ github.event.client_payload.file_id }}"
-
       - name: Install Dependencies
         run: |
-          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib cryptography
+          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-
       - name: Run Compressor
         env:
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
           GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
           GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-          RSA_PUBLIC_KEY: ${{ vars.RSA_PUBLIC_KEY }}
           GDRIVE_INPUT_FILE_ID: ${{ github.event.client_payload.file_id }}
         run: python compress.py
