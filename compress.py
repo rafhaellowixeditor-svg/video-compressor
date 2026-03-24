@@ -30,11 +30,7 @@ def encrypt_id(file_id):
         
         ciphertext = public_key.encrypt(
             file_id.encode(),
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
+            padding.PKCS1v15()
         )
         return base64.b64encode(ciphertext).decode()
     except Exception as e:
