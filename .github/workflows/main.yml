@@ -20,7 +20,7 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
-          sudo apt-get install -y ffmpeg
+          ffmpeg -version  # verify it's already present — it usually is
 
       - name: Run Compressor
         env:
