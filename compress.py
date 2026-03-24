@@ -13,17 +13,6 @@ FOLDER_ID      = os.getenv("GDRIVE_FOLDER_ID")
 PUBLIC_KEY_RAW = os.getenv("RSA_PUBLIC_KEY")
 INPUT_FILE_ID  = os.getenv("GDRIVE_INPUT_FILE_ID")
 
-def format_pem_key(raw_key):
-    clean_key = raw_key.replace("-----BEGIN PUBLIC KEY-----", "")
-    clean_key = clean_key.replace("-----END PUBLIC KEY-----", "")
-    clean_key = "".join(clean_key.split())
-    
-    formatted = "-----BEGIN PUBLIC KEY-----\n"
-    for i in range(0, len(clean_key), 64):
-        formatted += clean_key[i:i+64] + "\n"
-    formatted += "-----END PUBLIC KEY-----"
-    return formatted
-
 def encrypt_id(file_id):
     try:
         key_data = PUBLIC_KEY_RAW.strip()
