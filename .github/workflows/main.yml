@@ -8,19 +8,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with: { python-version: '3.9' }
-      
+
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          # This ensures you have 30GB+ for the 3GB file
-          
+
       - name: Install Dependencies
         run: |
           pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
-          ffmpeg -version  # verify it's already present — it usually is
+          sudo apt-get update
+          sudo apt-get install -y --fix-missing ffmpeg
 
       - name: Run Compressor
         env:
