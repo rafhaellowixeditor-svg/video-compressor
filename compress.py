@@ -4,6 +4,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+import uuid
 
 CLIENT_ID      = os.getenv("GDRIVE_CLIENT_ID")
 CLIENT_SECRET  = os.getenv("GDRIVE_CLIENT_SECRET")
@@ -75,7 +76,8 @@ def process():
         res = service.files().create(body=meta, media_body=media, fields='id').execute()
         uploaded_id = res.get('id')
 
-        new_name = f"{uploaded_id}.mp4"
+        random_uid = uuid.uuid4().hex 
+        new_name = f"{random_uid}.mp4"
         service.files().update(fileId=uploaded_id, body={'name': new_name}).execute()
 
         service.permissions().create(fileId=uploaded_id, body={'type': 'anyone', 'role': 'reader'}).execute()
