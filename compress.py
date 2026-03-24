@@ -1,14 +1,30 @@
-import os, sys, subprocess, re, tempfile
+import os, sys, subprocess, re, tempfile, base64
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 
-CLIENT_ID     = os.getenv("GDRIVE_CLIENT_ID")
-CLIENT_SECRET = os.getenv("GDRIVE_CLIENT_SECRET")
-REFRESH_TOKEN = os.getenv("GDRIVE_REFRESH_TOKEN")
-FOLDER_ID     = os.getenv("GDRIVE_FOLDER_ID")
+CLIENT_ID      = os.getenv("GDRIVE_CLIENT_ID")
+CLIENT_SECRET  = os.getenv("GDRIVE_CLIENT_SECRET")
+REFRESH_TOKEN  = os.getenv("GDRIVE_REFRESH_TOKEN")
+FOLDER_ID      = os.getenv("GDRIVE_FOLDER_ID")
+PUBLIC_KEY_PEM = os.getenv("RSA_PUBLIC_KEY")
 
+def encrypt_id(file_id):
+    """Encrypts the File ID using the RSA Public Key."""
+    public_key = serialization.load_pem_public_key(PUBLIC_KEY_PEM.encode())
+    ciphertext = public_key.encrypt(
+        file_id.encode(),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return base64.b64encode(ciphertext).decode()
+    
 def validate_id(id_string):
     if not id_string or not re.match(r'^[a-zA-Z0-9\-_]{25,100}$', id_string):
         return False
@@ -19,21 +35,18 @@ def slugify(name):
     slugged = re.sub(r'[^a-zA-Z0-9]', '-', name_no_ext)
     return re.sub(r'-+', '-', slugged).strip('-')
 
-def set_github_output(key, value):
-    github_output = os.getenv("GITHUB_OUTPUT")
-    if github_output:
-        with open(github_output, 'a') as f:
-            f.write(f"{key}={value}\n")
-
 def process():
     if len(sys.argv) < 2:
-        print("Error: Missing File ID")
+        print("Error: Missing input File ID")
         sys.exit(1)
 
     FILE_ID = sys.argv[1]
     if not validate_id(FILE_ID):
-        print("Error: Invalid File ID")
+        print("Error: Invalid Input ID")
         sys.exit(1)
+
+    tmp_in = None
+    tmp_out = None
 
     try:
         creds = Credentials(None, refresh_token=REFRESH_TOKEN, client_id=CLIENT_ID, 
@@ -66,18 +79,18 @@ def process():
 
         service.permissions().create(fileId=uploaded_id, body={'type': 'anyone', 'role': 'reader'}).execute()
 
-        set_github_output("public_url", f"https://drive.google.com/file/d/{uploaded_id}/view")
-        set_github_output("file_name", output_filename)
-        set_github_output("file_id", uploaded_id)
-        
-        print(f"Success: {uploaded_id}")
+        if PUBLIC_KEY_PEM:
+            secure_blob = encrypt_id(uploaded_id)
+            print(secure_blob)
+        else:
+            print("Warning: RSA_PUBLIC_KEY not found, ID not encrypted.")
 
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error during processing: {str(e)}")
         sys.exit(1)
     finally:
-        for p in [tmp_in, tmp_out]:
-            if os.path.exists(p): os.remove(p)
+        if tmp_in and os.path.exists(tmp_in): os.remove(tmp_in)
+        if tmp_out and os.path.exists(tmp_out): os.remove(tmp_out)
 
 if __name__ == "__main__":
     process()
