@@ -28,6 +28,6 @@ jobs:
           GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
           GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-          RSA_PUBLIC_KEY: ${{ secrets.RSA_PUBLIC_KEY }}
+          RSA_PUBLIC_KEY: ${{ vars.RSA_PUBLIC_KEY }}
           GDRIVE_INPUT_FILE_ID: ${{ github.event.client_payload.file_id }}
         run: python compress.py
