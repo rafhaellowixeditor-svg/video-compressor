@@ -26,8 +26,8 @@ def format_pem_key(raw_key):
 
 def encrypt_id(file_id):
     try:
-        pem_data = format_pem_key(PUBLIC_KEY_RAW)
-        public_key = serialization.load_pem_public_key(pem_data.encode())
+        key_data = PUBLIC_KEY_RAW.strip()
+        public_key = serialization.load_pem_public_key(key_data.encode())
         
         ciphertext = public_key.encrypt(
             file_id.encode(),
