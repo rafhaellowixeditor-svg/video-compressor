@@ -6,10 +6,6 @@ on:
 jobs:
   compress_job:
     runs-on: ubuntu-latest
-    outputs:
-      public_url: ${{ steps.compressor.outputs.public_url }}
-      file_name: ${{ steps.compressor.outputs.file_name }}
-      file_id: ${{ steps.compressor.outputs.file_id }}
 
     steps:
       - uses: actions/checkout@v3
@@ -24,15 +20,14 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib cryptography
           sudo apt-get update
-          sudo apt-get install -y --fix-missing ffmpeg
+          sudo apt-get install -y ffmpeg
 
       - name: Run Compressor
-        id: compressor
         env:
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
           GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
           GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
-          GDRIVE_FOLDER_ID: ${{ github.event.client_payload.folder_id || secrets.GDRIVE_FOLDER_ID }}
+          RSA_PUBLIC_KEY: ${{ secrets.RSA_PUBLIC_KEY }}
         run: python compress.py ${{ github.event.client_payload.file_id }}
